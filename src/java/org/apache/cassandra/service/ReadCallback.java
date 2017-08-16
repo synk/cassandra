@@ -18,7 +18,6 @@
 package org.apache.cassandra.service;
 
 import java.net.InetAddress;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -45,7 +44,6 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
@@ -191,16 +189,6 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
         return received;
     }
 
-    public void response(ReadResponse result)
-    {
-        MessageIn<ReadResponse> message = MessageIn.create(FBUtilities.getBroadcastAddress(),
-                                                           result,
-                                                           Collections.<String, byte[]>emptyMap(),
-                                                           MessagingService.Verb.INTERNAL_RESPONSE,
-                                                           MessagingService.current_version);
-        response(message);
-    }
-
     public void assureSufficientLiveNodes() throws UnavailableException
     {
         consistencyLevel.assureSufficientLiveNodes(keyspace, endpoints);
@@ -245,8 +233,22 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
                 final DataResolver repairResolver = new DataResolver(keyspace, command, consistencyLevel, endpoints.size(), queryStartNanoTime);
                 AsyncRepairCallback repairHandler = new AsyncRepairCallback(repairResolver, endpoints.size());
 
+                boolean hasLocalEndpoint = false;
+
                 for (InetAddress endpoint : endpoints)
+                {
+                    if (StorageProxy.canDoLocalRequest(endpoint))
+                    {
+                        hasLocalEndpoint = true;
+                        continue;
+                    }
                     MessagingService.instance().sendRR(command.createMessage(), endpoint, repairHandler);
+                }
+
+                if (hasLocalEndpoint)
+                {
+                    StageManager.getStage(Stage.READ).maybeExecuteImmediately(new StorageProxy.LocalReadRunnable(command, repairHandler));
+                }
             }
         }
     }

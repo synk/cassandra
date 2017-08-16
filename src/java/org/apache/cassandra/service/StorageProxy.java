@@ -1783,10 +1783,24 @@ public class StorageProxy implements StorageProxyMBean
                                                  executor.handler.endpoints,
                                                  queryStartNanoTime);
 
+                boolean hasLocalEndpoint = false;
+
                 for (InetAddress endpoint : executor.getContactedReplicas())
                 {
+                    if (canDoLocalRequest(endpoint))
+                    {
+                        hasLocalEndpoint = true;
+                        continue;
+                    }
+
                     Tracing.trace("Enqueuing full data read to {}", endpoint);
                     MessagingService.instance().sendRRWithFailure(command.createMessage(), endpoint, repairHandler);
+                }
+
+                if (hasLocalEndpoint)
+                {
+                    Tracing.trace("Reading full data locally");
+                    StageManager.getStage(Stage.READ).maybeExecuteImmediately(new LocalReadRunnable(command, repairHandler));
                 }
             }
         }
@@ -1829,10 +1843,10 @@ public class StorageProxy implements StorageProxyMBean
     static class LocalReadRunnable extends DroppableRunnable
     {
         private final ReadCommand command;
-        private final ReadCallback handler;
+        private final IAsyncCallbackWithFailure<ReadResponse> handler;
         private final long start = System.nanoTime();
 
-        LocalReadRunnable(ReadCommand command, ReadCallback handler)
+        LocalReadRunnable(ReadCommand command, IAsyncCallbackWithFailure<ReadResponse> handler)
         {
             super(MessagingService.Verb.READ);
             this.command = command;
@@ -1854,7 +1868,12 @@ public class StorageProxy implements StorageProxyMBean
 
                 if (command.complete())
                 {
-                    handler.response(response);
+                    MessageIn<ReadResponse> message = MessageIn.create(FBUtilities.getBroadcastAddress(),
+                                                                       response,
+                                                                       Collections.emptyMap(),
+                                                                       MessagingService.Verb.INTERNAL_RESPONSE,
+                                                                       MessagingService.current_version);
+                    handler.response(message);
                 }
                 else
                 {
