@@ -17,16 +17,18 @@
  */
 package org.apache.cassandra.service;
 
+import java.net.InetAddress;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.db.ReadResponse;
-import org.apache.cassandra.net.IAsyncCallback;
+import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.net.IAsyncCallbackWithFailure;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.utils.WrappedRunnable;
 
-public class AsyncRepairCallback implements IAsyncCallback<ReadResponse>
+public class AsyncRepairCallback implements IAsyncCallbackWithFailure<ReadResponse>
 {
     private final DataResolver repairResolver;
     private final int blockfor;
@@ -56,5 +58,9 @@ public class AsyncRepairCallback implements IAsyncCallback<ReadResponse>
     public boolean isLatencyForSnitch()
     {
         return true;
+    }
+
+    public void onFailure(InetAddress from, RequestFailureReason failureReason)
+    {
     }
 }
